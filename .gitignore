@@ -1,0 +1,37 @@
+# General Python/OS noise
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.Python
+.venv/
+venv/
+.env
+.env.*
+.ipynb_checkpoints/
+*.log
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+
+# Data / exports (keep these out of Git)
+*.fit
+*.FIT
+*.xlsx
+*.csv
+*.tsv
+*.parquet
+*.pkl
+*.pdf
+
+# Keep the app source
+!viewer_app/**
+!README.md
