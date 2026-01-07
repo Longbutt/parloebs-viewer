@@ -505,6 +505,7 @@ with st.sidebar:
     cadence_rev_m = st.number_input("Meters per rev (cadence)", 0.0, 20.0, 8.18, step=0.01)
     speed_mode1 = st.selectbox("Speed mode rider 1", ["sensor", "cadence", "gps", "gps_smooth"])
     speed_mode2 = st.selectbox("Speed mode rider 2", ["sensor", "cadence", "gps", "gps_smooth"], index=1)
+    shift_r1_seconds = st.slider("Rider 1 time shift (seconds)", -60, 60, 0)
     min_speed = st.slider("Minimum speed for intersections (km/h)", 0, 60, 15)
     min_seg_len = st.slider("Minimum segment duration (s)", 5, 120, 10)
     last_seconds = st.slider("Neutral overlay: last X seconds window", 3, 30, 6)
@@ -514,6 +515,11 @@ if file1 and file2:
     try:
         df1 = process_fit(file1.getvalue(), smooth_gps, cadence_rev_m)
         df2 = process_fit(file2.getvalue(), smooth_gps, cadence_rev_m)
+
+        if shift_r1_seconds != 0:
+            df1 = df1.copy()
+            df1["timestamp"] = df1["timestamp"] + pd.to_timedelta(shift_r1_seconds, unit="s")
+
         df1, df2 = align_pair(df1, df2, start_time, end_time)
     except Exception as exc:
         st.error(f"Problem loading or aligning files: {exc}")
