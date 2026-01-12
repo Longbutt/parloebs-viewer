@@ -249,7 +249,7 @@ def segment_by_intersections(df, intersections, min_duration_s=10):
 
 
 @st.cache_data(show_spinner=False)
-def segment_stats(df, speed_col="speed_cadence"):
+def segment_stats(df, speed_col="speed_cadence", weight_kg=None):
     agg = {
         "start_time": ("timestamp", "min"),
         "end_time": ("timestamp", "max"),
@@ -262,6 +262,8 @@ def segment_stats(df, speed_col="speed_cadence"):
     out = df.groupby("segment_id").agg(**agg).reset_index()
     out["duration_s"] = (out["end_time"] - out["start_time"]).dt.total_seconds()
     out["variability_index"] = out["normalized_power"] / out["avg_power"]
+    if weight_kg is not None and weight_kg > 0:
+        out["avg_power_wkg"] = out["avg_power"] / weight_kg
     return out
 
 
@@ -370,6 +372,7 @@ def plot_opposed_power_split_neutral_overlay(
     name1="Rider 1",
     name2="Rider 2",
     title="Neutral segments: power split last 6s vs rest",
+    xaxis_title="Average power [W] (neutral segments only)",
 ):
     merged = (
         p1.merge(p2, on="segment_id", suffixes=("_r1", "_r2"))
@@ -417,7 +420,7 @@ def plot_opposed_power_split_neutral_overlay(
     fig.update_layout(
         title=title,
         barmode="overlay",
-        xaxis_title="Average power [W] (neutral segments only)",
+        xaxis_title=xaxis_title,
         yaxis_title="segment_id",
         template="plotly_white",
         height=550,
@@ -433,6 +436,7 @@ def plot_opposed_power_split_active_overlay(
     name1="Rider 1",
     name2="Rider 2",
     title="Active segments: power split last 6s vs rest",
+    xaxis_title="Average power [W] (active segments only)",
 ):
     merged = (
         p1.merge(p2, on="segment_id", suffixes=("_r1", "_r2"))
@@ -480,7 +484,7 @@ def plot_opposed_power_split_active_overlay(
     fig.update_layout(
         title=title,
         barmode="overlay",
-        xaxis_title="Average power [W] (active segments only)",
+        xaxis_title=xaxis_title,
         yaxis_title="segment_id",
         template="plotly_white",
         height=550,
@@ -499,6 +503,8 @@ with st.sidebar:
     file2 = st.file_uploader("Rider 2 FIT", type=["fit"])
     rider1_name = st.text_input("Rider 1 name", "Rider 1")
     rider2_name = st.text_input("Rider 2 name", "Rider 2")
+    rider1_weight = st.number_input("Rider 1 weight (kg)", 0.0, 200.0, 70.0, step=0.1)
+    rider2_weight = st.number_input("Rider 2 weight (kg)", 0.0, 200.0, 70.0, step=0.1)
     start_time = st.text_input("Start time (optional, e.g. 2025-10-25 21:17:38)", "")
     end_time = st.text_input("End time (optional)", "")
     smooth_gps = st.slider("GPS speed smoothing points", 0, 20, 8)
@@ -521,6 +527,13 @@ if file1 and file2:
             df1["timestamp"] = df1["timestamp"] + pd.to_timedelta(shift_r1_seconds, unit="s")
 
         df1, df2 = align_pair(df1, df2, start_time, end_time)
+
+        if "power" in df1.columns and rider1_weight > 0:
+            df1 = df1.copy()
+            df1["power_wkg"] = df1["power"] / rider1_weight
+        if "power" in df2.columns and rider2_weight > 0:
+            df2 = df2.copy()
+            df2["power_wkg"] = df2["power"] / rider2_weight
     except Exception as exc:
         st.error(f"Problem loading or aligning files: {exc}")
     else:
@@ -556,15 +569,24 @@ if file1 and file2:
         df1_seg = segment_by_intersections(df1, intersections, min_duration_s=min_seg_len)
         df2_seg = segment_by_intersections(df2, intersections, min_duration_s=min_seg_len)
 
-        stats1 = segment_stats(df1_seg)
-        stats2 = segment_stats(df2_seg)
+        stats1 = segment_stats(df1_seg, weight_kg=rider1_weight)
+        stats2 = segment_stats(df2_seg, weight_kg=rider2_weight)
         merged = stats1.merge(stats2, on="segment_id", suffixes=(f"_{rider1_name}", f"_{rider2_name}"))
         st.dataframe(merged)
 
         roles = build_roles(stats1, stats2)
 
         st.subheader("Opposed segment comparison")
-        available_metrics = [m for m in ["avg_power", "avg_speed_kmh", "normalized_power", "variability_index"] if m in stats1.columns and m in stats2.columns]
+        available_metrics = [
+            m for m in [
+                "avg_power",
+                "avg_power_wkg",
+                "avg_speed_kmh",
+                "normalized_power",
+                "variability_index",
+            ]
+            if m in stats1.columns and m in stats2.columns
+        ]
         if available_metrics:
             metric_choice = st.selectbox("Metric", available_metrics, index=0)
             bar_scale = st.slider("Bar thickness scale", 0.5, 2.0, 1.2, 0.1)
@@ -580,35 +602,61 @@ if file1 and file2:
             st.warning("No common metrics available to plot.")
 
         st.subheader(f"Power split: last {last_seconds}s vs rest (per segment)")
+        use_wkg = st.toggle("Show power in W/kg (both riders)", value=False)
+
         p1 = power_split_stats(df1_seg, last_seconds=last_seconds)
         p2 = power_split_stats(df2_seg, last_seconds=last_seconds)
+
+        p1_disp = p1.copy()
+        p2_disp = p2.copy()
+        if use_wkg and rider1_weight > 0:
+            p1_disp["avg_power_last"] = p1_disp["avg_power_last"] / rider1_weight
+            p1_disp["avg_power_rest"] = p1_disp["avg_power_rest"] / rider1_weight
+        if use_wkg and rider2_weight > 0:
+            p2_disp["avg_power_last"] = p2_disp["avg_power_last"] / rider2_weight
+            p2_disp["avg_power_rest"] = p2_disp["avg_power_rest"] / rider2_weight
+
+        p1_plot = p1_disp
+        p2_plot = p2_disp
+
+        if use_wkg and rider1_weight <= 0:
+            st.warning("Rider 1 weight must be > 0 to use W/kg.")
+        if use_wkg and rider2_weight <= 0:
+            st.warning("Rider 2 weight must be > 0 to use W/kg.")
         col_ps1, col_ps2 = st.columns(2, gap="large")
         with col_ps1:
             st.markdown(f"**{rider1_name}**")
+            unit1 = "W/kg" if use_wkg else "W"
             st.dataframe(
-                p1.rename(
+                p1_disp.rename(
                     columns={
-                        "avg_power_last": f"avg_power_last ({last_seconds}s, W)",
-                        "avg_power_rest": "avg_power_rest (W)",
+                        "avg_power_last": f"avg_power_last ({last_seconds}s, {unit1})",
+                        "avg_power_rest": f"avg_power_rest ({unit1})",
                     }
                 )
             )
         with col_ps2:
             st.markdown(f"**{rider2_name}**")
+            unit2 = "W/kg" if use_wkg else "W"
             st.dataframe(
-                p2.rename(
+                p2_disp.rename(
                     columns={
-                        "avg_power_last": f"avg_power_last ({last_seconds}s, W)",
-                        "avg_power_rest": "avg_power_rest (W)",
+                        "avg_power_last": f"avg_power_last ({last_seconds}s, {unit2})",
+                        "avg_power_rest": f"avg_power_rest ({unit2})",
                     }
                 )
             )
 
         st.subheader("Neutral-only power split overlay")
+        if use_wkg:
+            xaxis_title = "Average power [W/kg]"
+        else:
+            xaxis_title = "Average power [W]"
         st.plotly_chart(
             plot_opposed_power_split_neutral_overlay(
-                p1, p2, roles=roles, name1=rider1_name, name2=rider2_name,
-                title=f"Neutral segments: last {last_seconds}s vs rest"
+                p1_plot, p2_plot, roles=roles, name1=rider1_name, name2=rider2_name,
+                title=f"Neutral segments: last {last_seconds}s vs rest",
+                xaxis_title=xaxis_title,
             ),
             use_container_width=True,
         )
@@ -616,8 +664,9 @@ if file1 and file2:
         st.subheader("Active-only power split overlay")
         st.plotly_chart(
             plot_opposed_power_split_active_overlay(
-                p1, p2, roles=roles, name1=rider1_name, name2=rider2_name,
-                title=f"Active segments: last {last_seconds}s vs rest"
+                p1_plot, p2_plot, roles=roles, name1=rider1_name, name2=rider2_name,
+                title=f"Active segments: last {last_seconds}s vs rest",
+                xaxis_title=xaxis_title,
             ),
             use_container_width=True,
         )
