@@ -51,11 +51,11 @@ def trim_and_align_on_timestamp(df1, df2, start_time=None, end_time=None):
 
 
 @st.cache_data(show_spinner=False)
-def process_fit(file_bytes: bytes, smooth_gps: int, cadence_rev_m: float):
+def process_fit(file_bytes: bytes, smooth_gps: int, meters_per_rev: float):
     """End-to-end rider preprocessing (parse + speeds)."""
     df = fit_to_dataframe(file_bytes)
     df = compute_gps_speed(df, smooth_points=smooth_gps)
-    df = compute_cadence_speed(df, smooth_points=0, meters_per_rev=cadence_rev_m)
+    df = compute_cadence_speed(df, smooth_points=0, meters_per_rev=meters_per_rev)
     return df
 
 
@@ -145,15 +145,33 @@ def get_speed_series(df, mode):
     return None
 
 
-def compare_rides_power_speed(df1, df2, name1="Ride 1", name2="Ride 2", speed_mode1="sensor", speed_mode2="sensor"):
+def compare_rides_power_speed(
+    df1,
+    df2,
+    name1="Ride 1",
+    name2="Ride 2",
+    speed_mode1="sensor",
+    speed_mode2="sensor",
+    use_wkg=False,
+):
     df1 = df1.sort_values("timestamp")
     df2 = df2.sort_values("timestamp")
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
                         subplot_titles=("Power comparison", "Speed comparison"), vertical_spacing=0.1)
 
-    if "power" in df1.columns:
+    if use_wkg and "power_wkg" in df1.columns:
+        fig.add_trace(
+            go.Scatter(x=df1["timestamp"], y=df1["power_wkg"], mode="lines", name=f"{name1} power (W/kg)"),
+            row=1, col=1
+        )
+    elif "power" in df1.columns:
         fig.add_trace(go.Scatter(x=df1["timestamp"], y=df1["power"], mode="lines", name=f"{name1} power"), row=1, col=1)
-    if "power" in df2.columns:
+    if use_wkg and "power_wkg" in df2.columns:
+        fig.add_trace(
+            go.Scatter(x=df2["timestamp"], y=df2["power_wkg"], mode="lines", name=f"{name2} power (W/kg)"),
+            row=1, col=1
+        )
+    elif "power" in df2.columns:
         fig.add_trace(go.Scatter(x=df2["timestamp"], y=df2["power"], mode="lines", name=f"{name2} power"), row=1, col=1)
 
     s1 = get_speed_series(df1, speed_mode1)
@@ -497,30 +515,45 @@ def plot_opposed_power_split_active_overlay(
 st.title("Parloebs Analyse – interactive viewer")
 st.markdown("Upload two FIT files, align them on time, and explore speeds, power, intersections, and segments.")
 
-with st.sidebar:
-    st.header("Inputs")
-    file1 = st.file_uploader("Rider 1 FIT", type=["fit"])
-    file2 = st.file_uploader("Rider 2 FIT", type=["fit"])
-    rider1_name = st.text_input("Rider 1 name", "Rider 1")
-    rider2_name = st.text_input("Rider 2 name", "Rider 2")
-    rider1_weight = st.number_input("Rider 1 weight (kg)", 0.0, 200.0, 70.0, step=0.1)
-    rider2_weight = st.number_input("Rider 2 weight (kg)", 0.0, 200.0, 70.0, step=0.1)
-    start_time = st.text_input("Start time (optional, e.g. 2025-10-25 21:17:38)", "")
-    end_time = st.text_input("End time (optional)", "")
-    smooth_gps = st.slider("GPS speed smoothing points", 0, 20, 8)
-    cadence_rev_m = st.number_input("Meters per rev (cadence)", 0.0, 20.0, 8.18, step=0.01)
-    speed_mode1 = st.selectbox("Speed mode rider 1", ["sensor", "cadence", "gps", "gps_smooth"])
-    speed_mode2 = st.selectbox("Speed mode rider 2", ["sensor", "cadence", "gps", "gps_smooth"], index=1)
-    shift_r1_seconds = st.slider("Rider 1 time shift (seconds)", -60, 60, 0)
-    min_speed = st.slider("Minimum speed for intersections (km/h)", 0, 60, 15)
-    min_seg_len = st.slider("Minimum segment duration (s)", 5, 120, 10)
-    last_seconds = st.slider("Neutral overlay: last X seconds window", 3, 30, 6)
-    show_raw = st.checkbox("Show raw data tables", False)
+with st.expander("1) Riders & files", expanded=True):
+    col_r1, col_r2 = st.columns(2, gap="large")
+    with col_r1:
+        st.markdown("**Rider 1**")
+        file1 = st.file_uploader("FIT file", type=["fit"], key="r1_file")
+        rider1_name = st.text_input("Name", "Rider 1", key="r1_name")
+        rider1_weight = st.number_input("Weight (kg)", 0.0, 200.0, 70.0, step=0.1, key="r1_weight")
+        speed_mode1 = st.selectbox("Speed mode", ["sensor", "cadence", "gps", "gps_smooth"], index=1, key="r1_speedmode")
+        meters_per_rev1 = st.number_input("Meters per rev (cadence)", 0.0, 20.0, 8.18, step=0.01, key="r1_mpr")
+
+    with col_r2:
+        st.markdown("**Rider 2**")
+        file2 = st.file_uploader("FIT file", type=["fit"], key="r2_file")
+        rider2_name = st.text_input("Name", "Rider 2", key="r2_name")
+        rider2_weight = st.number_input("Weight (kg)", 0.0, 200.0, 70.0, step=0.1, key="r2_weight")
+        speed_mode2 = st.selectbox("Speed mode", ["sensor", "cadence", "gps", "gps_smooth"], index=1, key="r2_speedmode")
+        meters_per_rev2 = st.number_input("Meters per rev (cadence)", 0.0, 20.0, 8.18, step=0.01, key="r2_mpr")
+
+    if speed_mode1 == "gps_smooth" or speed_mode2 == "gps_smooth":
+        smooth_gps = st.slider("GPS speed smoothing points", 0, 20, 8)
+    else:
+        smooth_gps = 0
+
+show_raw = st.checkbox("Show raw data tables", False)
 
 if file1 and file2:
+    exp_align = st.expander("2) Alignment & intersections", expanded=True)
+    with exp_align:
+        col_a1, col_a2 = st.columns(2, gap="large")
+        with col_a1:
+            start_time = st.text_input("Start time (optional, e.g. 2025-10-25 21:17:38)", "")
+            end_time = st.text_input("End time (optional)", "")
+            shift_r1_seconds = st.slider("Rider 1 time shift (seconds)", -60, 60, 0)
+        with col_a2:
+            min_speed = st.slider("Minimum speed for intersections (km/h)", 0, 60, 15)
+            min_seg_len = st.slider("Minimum segment duration (s)", 5, 120, 10)
     try:
-        df1 = process_fit(file1.getvalue(), smooth_gps, cadence_rev_m)
-        df2 = process_fit(file2.getvalue(), smooth_gps, cadence_rev_m)
+        df1 = process_fit(file1.getvalue(), smooth_gps, meters_per_rev1)
+        df2 = process_fit(file2.getvalue(), smooth_gps, meters_per_rev2)
 
         if shift_r1_seconds != 0:
             df1 = df1.copy()
@@ -539,44 +572,98 @@ if file1 and file2:
     else:
         st.success(f"Aligned {len(df1)} samples; timestamps match: {df1['timestamp'].equals(df2['timestamp'])}")
 
-        st.subheader("Single-ride views")
-        col1, col2 = st.columns(2, gap="large")
-        with col1:
-            st.plotly_chart(plot_fit_interactive(df1, title=f"{rider1_name} signals"), use_container_width=True)
-        with col2:
-            st.plotly_chart(plot_fit_interactive(df2, title=f"{rider2_name} signals"), use_container_width=True)
+        plot_header_cols = st.columns([2, 1, 1], gap="large")
+        with plot_header_cols[0]:
+            st.subheader("Plots")
+        with plot_header_cols[1]:
+            use_wkg = st.toggle("Show power in W/kg", value=False)
 
-        st.subheader("Power and speed comparison")
-        st.plotly_chart(
-            compare_rides_power_speed(df1, df2, name1=rider1_name, name2=rider2_name,
-                                      speed_mode1=speed_mode1, speed_mode2=speed_mode2),
-            use_container_width=True,
+        plot_options = [
+            f"{rider1_name} signals",
+            f"{rider2_name} signals",
+            "Power and speed comparison",
+            "Opposed segment comparison",
+            "Neutral-only power split overlay",
+            "Active-only power split overlay",
+            "Segment stats table",
+            "Power split tables",
+        ]
+        selected_plots = st.multiselect(
+            "Choose plots to show",
+            plot_options,
+            default=["Power and speed comparison"],
         )
+        tiles_per_row = st.slider("Tiles per row", 1, 3, 1)
 
-        st.subheader("Speed intersections")
+        needs_power_split_window = any(
+            name in selected_plots for name in [
+                "Neutral-only power split overlay",
+                "Active-only power split overlay",
+                "Power split tables",
+            ]
+        )
+        if needs_power_split_window:
+            with plot_header_cols[2]:
+                last_seconds = st.slider("Last X seconds", 3, 30, 6)
+        else:
+            last_seconds = 6
+
+        plot_state = {"i": 0, "cols": st.columns(tiles_per_row, gap="large")}
+
+        def place_plot(title, fig):
+            i = plot_state["i"]
+            if i % tiles_per_row == 0:
+                plot_state["cols"] = st.columns(tiles_per_row, gap="large")
+            col = plot_state["cols"][i % tiles_per_row]
+            with col:
+                st.markdown(f"**{title}**")
+                st.plotly_chart(fig, use_container_width=True)
+            plot_state["i"] = i + 1
+
+        def place_table(title, render_fn):
+            i = plot_state["i"]
+            if i % tiles_per_row == 0:
+                plot_state["cols"] = st.columns(tiles_per_row, gap="large")
+            col = plot_state["cols"][i % tiles_per_row]
+            with col:
+                st.markdown(f"**{title}**")
+                render_fn()
+            plot_state["i"] = i + 1
+
+        if f"{rider1_name} signals" in selected_plots:
+            place_plot(f"{rider1_name} signals", plot_fit_interactive(df1, title=f"{rider1_name} signals"))
+        if f"{rider2_name} signals" in selected_plots:
+            place_plot(f"{rider2_name} signals", plot_fit_interactive(df2, title=f"{rider2_name} signals"))
+        if "Power and speed comparison" in selected_plots:
+            place_plot(
+                "Power and speed comparison",
+                compare_rides_power_speed(
+                    df1, df2, name1=rider1_name, name2=rider2_name,
+                    speed_mode1=speed_mode1, speed_mode2=speed_mode2, use_wkg=use_wkg,
+                ),
+            )
+
         intersections = find_speed_intersections_same_time(
             df1, df2, speed_mode1=speed_mode1, speed_mode2=speed_mode2, min_speed=min_speed
         )
-        st.plotly_chart(
+        exp_align.plotly_chart(
             plot_speed_with_intersections(df1, df2, intersections,
                                           name1=rider1_name, name2=rider2_name,
                                           speed_mode1=speed_mode1, speed_mode2=speed_mode2),
             use_container_width=True,
         )
-        # st.dataframe(intersections)
 
-        st.subheader("Segment analysis")
         df1_seg = segment_by_intersections(df1, intersections, min_duration_s=min_seg_len)
         df2_seg = segment_by_intersections(df2, intersections, min_duration_s=min_seg_len)
 
         stats1 = segment_stats(df1_seg, weight_kg=rider1_weight)
         stats2 = segment_stats(df2_seg, weight_kg=rider2_weight)
         merged = stats1.merge(stats2, on="segment_id", suffixes=(f"_{rider1_name}", f"_{rider2_name}"))
-        st.dataframe(merged)
 
         roles = build_roles(stats1, stats2)
 
-        st.subheader("Opposed segment comparison")
+        if "Opposed segment comparison" in selected_plots:
+            st.subheader("Opposed segment comparison")
         available_metrics = [
             m for m in [
                 "avg_power",
@@ -587,22 +674,20 @@ if file1 and file2:
             ]
             if m in stats1.columns and m in stats2.columns
         ]
-        if available_metrics:
-            metric_choice = st.selectbox("Metric", available_metrics, index=0)
-            bar_scale = st.slider("Bar thickness scale", 0.5, 2.0, 1.2, 0.1)
-            role_filter = st.selectbox("Show segments by role", ["all", "active", "neutral"], index=0)
-            st.plotly_chart(
-                plot_opposed_segment_metric(
-                    stats1, stats2, roles=roles, metric=metric_choice,
-                    name1=rider1_name, name2=rider2_name, duration_scale=bar_scale, role_filter=role_filter,
-                ),
-                use_container_width=True,
-            )
-        else:
-            st.warning("No common metrics available to plot.")
-
-        st.subheader(f"Power split: last {last_seconds}s vs rest (per segment)")
-        use_wkg = st.toggle("Show power in W/kg (both riders)", value=False)
+        if "Opposed segment comparison" in selected_plots:
+            if available_metrics:
+                metric_choice = st.selectbox("Metric", available_metrics, index=0)
+                bar_scale = st.slider("Bar thickness scale", 0.5, 2.0, 1.2, 0.1)
+                role_filter = st.selectbox("Show segments by role", ["all", "active", "neutral"], index=0)
+                place_plot(
+                    "Opposed segment comparison",
+                    plot_opposed_segment_metric(
+                        stats1, stats2, roles=roles, metric=metric_choice,
+                        name1=rider1_name, name2=rider2_name, duration_scale=bar_scale, role_filter=role_filter,
+                    ),
+                )
+            else:
+                st.warning("No common metrics available to plot.")
 
         p1 = power_split_stats(df1_seg, last_seconds=last_seconds)
         p2 = power_split_stats(df2_seg, last_seconds=last_seconds)
@@ -623,53 +708,60 @@ if file1 and file2:
             st.warning("Rider 1 weight must be > 0 to use W/kg.")
         if use_wkg and rider2_weight <= 0:
             st.warning("Rider 2 weight must be > 0 to use W/kg.")
-        col_ps1, col_ps2 = st.columns(2, gap="large")
-        with col_ps1:
-            st.markdown(f"**{rider1_name}**")
-            unit1 = "W/kg" if use_wkg else "W"
-            st.dataframe(
-                p1_disp.rename(
-                    columns={
-                        "avg_power_last": f"avg_power_last ({last_seconds}s, {unit1})",
-                        "avg_power_rest": f"avg_power_rest ({unit1})",
-                    }
+        def render_power_split_tables():
+            col_ps1, col_ps2 = st.columns(2, gap="large")
+            with col_ps1:
+                st.markdown(f"**{rider1_name}**")
+                unit1 = "W/kg" if use_wkg else "W"
+                st.dataframe(
+                    p1_disp.rename(
+                        columns={
+                            "avg_power_last": f"avg_power_last ({last_seconds}s, {unit1})",
+                            "avg_power_rest": f"avg_power_rest ({unit1})",
+                        }
+                    )
                 )
-            )
-        with col_ps2:
-            st.markdown(f"**{rider2_name}**")
-            unit2 = "W/kg" if use_wkg else "W"
-            st.dataframe(
-                p2_disp.rename(
-                    columns={
-                        "avg_power_last": f"avg_power_last ({last_seconds}s, {unit2})",
-                        "avg_power_rest": f"avg_power_rest ({unit2})",
-                    }
+            with col_ps2:
+                st.markdown(f"**{rider2_name}**")
+                unit2 = "W/kg" if use_wkg else "W"
+                st.dataframe(
+                    p2_disp.rename(
+                        columns={
+                            "avg_power_last": f"avg_power_last ({last_seconds}s, {unit2})",
+                            "avg_power_rest": f"avg_power_rest ({unit2})",
+                        }
+                    )
                 )
-            )
 
-        st.subheader("Neutral-only power split overlay")
+        if "Segment stats table" in selected_plots:
+            place_table("Segment stats table", lambda: st.dataframe(merged))
+
+        if "Power split tables" in selected_plots:
+            place_table("Power split tables", render_power_split_tables)
+
         if use_wkg:
             xaxis_title = "Average power [W/kg]"
         else:
             xaxis_title = "Average power [W]"
-        st.plotly_chart(
-            plot_opposed_power_split_neutral_overlay(
-                p1_plot, p2_plot, roles=roles, name1=rider1_name, name2=rider2_name,
-                title=f"Neutral segments: last {last_seconds}s vs rest",
-                xaxis_title=xaxis_title,
-            ),
-            use_container_width=True,
-        )
+        if "Neutral-only power split overlay" in selected_plots:
+            place_plot(
+                "Neutral-only power split overlay",
+                plot_opposed_power_split_neutral_overlay(
+                    p1_plot, p2_plot, roles=roles, name1=rider1_name, name2=rider2_name,
+                    title=f"Neutral segments: last {last_seconds}s vs rest",
+                    xaxis_title=xaxis_title,
+                ),
+            )
 
-        st.subheader("Active-only power split overlay")
-        st.plotly_chart(
-            plot_opposed_power_split_active_overlay(
-                p1_plot, p2_plot, roles=roles, name1=rider1_name, name2=rider2_name,
-                title=f"Active segments: last {last_seconds}s vs rest",
-                xaxis_title=xaxis_title,
-            ),
-            use_container_width=True,
-        )
+        if "Active-only power split overlay" in selected_plots:
+            place_plot(
+                "Active-only power split overlay",
+                plot_opposed_power_split_active_overlay(
+                    p1_plot, p2_plot, roles=roles, name1=rider1_name, name2=rider2_name,
+                    title=f"Active segments: last {last_seconds}s vs rest",
+                    xaxis_title=xaxis_title,
+                ),
+            )
 
         if show_raw:
             st.subheader("Raw aligned data")
