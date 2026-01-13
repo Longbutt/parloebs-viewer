@@ -8,6 +8,9 @@ from plotly.subplots import make_subplots
 
 st.set_page_config(page_title="Parloebs Analyse Viewer", layout="wide")
 
+RIDER1_COLOR = "#636EFA"
+RIDER2_COLOR = "#EF553B"
+
 
 # ---------- Data utilities ----------
 @st.cache_data(show_spinner=False)
@@ -145,6 +148,18 @@ def get_speed_series(df, mode):
     return None
 
 
+def get_speed_series_ms(df, mode):
+    if mode == "sensor" and "speed" in df:
+        return df["speed"]
+    if mode == "cadence" and "speed_cadence" in df:
+        return df["speed_cadence"]
+    if mode == "gps" and "speed_gps" in df:
+        return df["speed_gps"]
+    if mode == "gps_smooth" and "speed_gps_smooth" in df:
+        return df["speed_gps_smooth"]
+    return None
+
+
 def compare_rides_power_speed(
     df1,
     df2,
@@ -161,27 +176,93 @@ def compare_rides_power_speed(
 
     if use_wkg and "power_wkg" in df1.columns:
         fig.add_trace(
-            go.Scatter(x=df1["timestamp"], y=df1["power_wkg"], mode="lines", name=f"{name1} power (W/kg)"),
+            go.Scatter(x=df1["timestamp"], y=df1["power_wkg"], mode="lines", name=f"{name1} power (W/kg)", line=dict(color=RIDER1_COLOR)),
             row=1, col=1
         )
     elif "power" in df1.columns:
-        fig.add_trace(go.Scatter(x=df1["timestamp"], y=df1["power"], mode="lines", name=f"{name1} power"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df1["timestamp"], y=df1["power"], mode="lines", name=f"{name1} power", line=dict(color=RIDER1_COLOR)), row=1, col=1)
     if use_wkg and "power_wkg" in df2.columns:
         fig.add_trace(
-            go.Scatter(x=df2["timestamp"], y=df2["power_wkg"], mode="lines", name=f"{name2} power (W/kg)"),
+            go.Scatter(x=df2["timestamp"], y=df2["power_wkg"], mode="lines", name=f"{name2} power (W/kg)", line=dict(color=RIDER2_COLOR)),
             row=1, col=1
         )
     elif "power" in df2.columns:
-        fig.add_trace(go.Scatter(x=df2["timestamp"], y=df2["power"], mode="lines", name=f"{name2} power"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df2["timestamp"], y=df2["power"], mode="lines", name=f"{name2} power", line=dict(color=RIDER2_COLOR)), row=1, col=1)
 
     s1 = get_speed_series(df1, speed_mode1)
     s2 = get_speed_series(df2, speed_mode2)
     if s1 is not None:
-        fig.add_trace(go.Scatter(x=df1["timestamp"], y=s1, mode="lines", name=f"{name1} {speed_mode1} speed"), row=2, col=1)
+        fig.add_trace(go.Scatter(x=df1["timestamp"], y=s1, mode="lines", name=f"{name1} {speed_mode1} speed", line=dict(color=RIDER1_COLOR)), row=2, col=1)
     if s2 is not None:
-        fig.add_trace(go.Scatter(x=df2["timestamp"], y=s2, mode="lines", name=f"{name2} {speed_mode2} speed"), row=2, col=1)
+        fig.add_trace(go.Scatter(x=df2["timestamp"], y=s2, mode="lines", name=f"{name2} {speed_mode2} speed", line=dict(color=RIDER2_COLOR)), row=2, col=1)
 
     fig.update_layout(title="Ride comparison: power and speed", hovermode="x unified", height=650, template="plotly_white")
+    return fig
+
+
+def plot_power_speed_with_residuals(
+    df1,
+    df2,
+    energy_df,
+    name1="Ride 1",
+    name2="Ride 2",
+    speed_mode1="sensor",
+    speed_mode2="sensor",
+    use_wkg=False,
+):
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        subplot_titles=("Power comparison", "Speed comparison", "Intersection residuals"),
+        vertical_spacing=0.08,
+        row_heights=[0.45, 0.35, 0.35],
+    )
+
+    # Power traces
+    if use_wkg and "power_wkg" in df1.columns:
+        fig.add_trace(go.Scatter(x=df1["timestamp"], y=df1["power_wkg"], mode="lines", name=f"{name1} power (W/kg)", line=dict(color=RIDER1_COLOR)), row=1, col=1, secondary_y=False)
+    elif "power" in df1.columns:
+        fig.add_trace(go.Scatter(x=df1["timestamp"], y=df1["power"], mode="lines", name=f"{name1} power", line=dict(color=RIDER1_COLOR)), row=1, col=1, secondary_y=False)
+
+    if use_wkg and "power_wkg" in df2.columns:
+        fig.add_trace(go.Scatter(x=df2["timestamp"], y=df2["power_wkg"], mode="lines", name=f"{name2} power (W/kg)", line=dict(color=RIDER2_COLOR)), row=1, col=1, secondary_y=False)
+    elif "power" in df2.columns:
+        fig.add_trace(go.Scatter(x=df2["timestamp"], y=df2["power"], mode="lines", name=f"{name2} power", line=dict(color=RIDER2_COLOR)), row=1, col=1, secondary_y=False)
+
+    # Speed traces
+    s1 = get_speed_series(df1, speed_mode1)
+    s2 = get_speed_series(df2, speed_mode2)
+    if s1 is not None:
+        fig.add_trace(go.Scatter(x=df1["timestamp"], y=s1, mode="lines", name=f"{name1} {speed_mode1} speed", line=dict(color=RIDER1_COLOR)), row=2, col=1)
+    if s2 is not None:
+        fig.add_trace(go.Scatter(x=df2["timestamp"], y=s2, mode="lines", name=f"{name2} {speed_mode2} speed", line=dict(color=RIDER2_COLOR)), row=2, col=1)
+
+    # Residual bars on third row (last in legend)
+    avg_residual = (energy_df["r1_residual_j"] + energy_df["r2_residual_j"]) / 2.0
+    net_residual = energy_df["residual_net_j"].abs() / 2.0
+    fig.add_trace(
+        go.Bar(
+            x=energy_df["timestamp"],
+            y=avg_residual,
+            error_y=dict(type="data", array=net_residual, visible=True),
+            name="Avg residual",
+            width=10000,
+            marker=dict(
+                color=avg_residual,
+                colorscale="RdYlGn_r",
+                showscale=False,
+            ),
+        ),
+        row=3,
+        col=1,
+    )
+
+    power_unit = "W/kg" if use_wkg and "power_wkg" in df1.columns and "power_wkg" in df2.columns else "W"
+    fig.update_yaxes(title_text=f"Power [{power_unit}]", row=1, col=1)
+    fig.update_yaxes(title_text="Speed [km/h]", row=2, col=1)
+    fig.update_yaxes(title_text="Residual energy [J]", row=3, col=1, rangemode="tozero", zeroline=True)
+    fig.update_layout(title="Power, speed, and intersection residuals", hovermode="x unified", height=750, template="plotly_white")
     return fig
 
 
@@ -236,14 +317,14 @@ def plot_speed_with_intersections(df1, df2, intersections, name1="Ride 1", name2
     s2 = get_speed_series(df2, speed_mode2)
     fig = go.Figure()
     if s1 is not None:
-        fig.add_trace(go.Scatter(x=df1["timestamp"], y=s1, mode="lines", name=f"{name1} ({speed_mode1})"))
+        fig.add_trace(go.Scatter(x=df1["timestamp"], y=s1, mode="lines", name=f"{name1} ({speed_mode1})", line=dict(color=RIDER1_COLOR)))
     if s2 is not None:
-        fig.add_trace(go.Scatter(x=df2["timestamp"], y=s2, mode="lines", name=f"{name2} ({speed_mode2})"))
+        fig.add_trace(go.Scatter(x=df2["timestamp"], y=s2, mode="lines", name=f"{name2} ({speed_mode2})", line=dict(color=RIDER2_COLOR)))
     if not intersections.empty:
         fig.add_trace(go.Scatter(
             x=intersections["timestamp"], y=intersections["speed1_kmh"], mode="markers", name="Intersections",
-            marker=dict(size=9, symbol="x")
-        ))
+                marker=dict(size=9, symbol="x", color="#333333")
+            ))
     fig.update_layout(title="Speed comparison with intersections", xaxis_title="Timestamp",
                       yaxis_title="Speed [km/h]", hovermode="x unified", height=600, template="plotly_white")
     return fig
@@ -365,8 +446,8 @@ def plot_opposed_segment_metric(
     widths = (durations / max_dur) * duration_scale
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=x1, y=y, width=widths, orientation="h", name=name1))
-    fig.add_trace(go.Bar(x=x2, y=y, width=widths, orientation="h", name=name2))
+    fig.add_trace(go.Bar(x=x1, y=y, width=widths, orientation="h", name=name1, marker=dict(color=RIDER1_COLOR)))
+    fig.add_trace(go.Bar(x=x2, y=y, width=widths, orientation="h", name=name2, marker=dict(color=RIDER2_COLOR)))
 
     if title is None:
         title = f"Segment comparison: {metric}"
@@ -412,13 +493,15 @@ def plot_opposed_power_split_neutral_overlay(
         orientation="h",
         name=f"{name1} neutral last 6s",
         opacity=0.7,
+        marker=dict(color="#9467BD"),
     ))
     fig.add_trace(go.Bar(
         x=-merged["avg_power_rest_r1"].where(r1_neutral),
         y=y,
         orientation="h",
         name=f"{name1} neutral remainder",
-        opacity=0.4,
+        opacity=1.0,
+        marker=dict(color=RIDER1_COLOR),
     ))
     fig.add_trace(go.Bar(
         x=merged["avg_power_last_r2"].where(r2_neutral),
@@ -426,13 +509,15 @@ def plot_opposed_power_split_neutral_overlay(
         orientation="h",
         name=f"{name2} neutral last 6s",
         opacity=0.7,
+        marker=dict(color="#FF9900"),
     ))
     fig.add_trace(go.Bar(
         x=merged["avg_power_rest_r2"].where(r2_neutral),
         y=y,
         orientation="h",
         name=f"{name2} neutral remainder",
-        opacity=0.4,
+        opacity=1.0,
+        marker=dict(color=RIDER2_COLOR),
     ))
 
     fig.update_layout(
@@ -476,13 +561,15 @@ def plot_opposed_power_split_active_overlay(
         orientation="h",
         name=f"{name1} active last 6s",
         opacity=0.7,
+        marker=dict(color="#9467BD"),
     ))
     fig.add_trace(go.Bar(
         x=-merged["avg_power_rest_r1"].where(r1_active),
         y=y,
         orientation="h",
         name=f"{name1} active remainder",
-        opacity=0.4,
+        opacity=1.0,
+        marker=dict(color=RIDER1_COLOR),
     ))
     fig.add_trace(go.Bar(
         x=merged["avg_power_last_r2"].where(r2_active),
@@ -490,13 +577,15 @@ def plot_opposed_power_split_active_overlay(
         orientation="h",
         name=f"{name2} active last 6s",
         opacity=0.7,
+        marker=dict(color="#FF9900"),
     ))
     fig.add_trace(go.Bar(
         x=merged["avg_power_rest_r2"].where(r2_active),
         y=y,
         orientation="h",
         name=f"{name2} active remainder",
-        opacity=0.4,
+        opacity=1.0,
+        marker=dict(color=RIDER2_COLOR),
     ))
 
     fig.update_layout(
@@ -508,6 +597,164 @@ def plot_opposed_power_split_active_overlay(
         height=550,
     )
     fig.add_shape(type="line", x0=0, x1=0, y0=-0.5, y1=len(y) - 0.5, line=dict(width=1, color="black"))
+    return fig
+
+
+def compute_intersection_energy_table(
+    df1,
+    df2,
+    intersections,
+    speed_mode1,
+    speed_mode2,
+    mass1,
+    mass2,
+    window_points=3,
+):
+    if intersections.empty:
+        return pd.DataFrame()
+
+    v1 = get_speed_series_ms(df1, speed_mode1)
+    v2 = get_speed_series_ms(df2, speed_mode2)
+    if v1 is None or v2 is None:
+        return pd.DataFrame()
+
+    if "altitude" in df1.columns:
+        h1 = df1["altitude"]
+    else:
+        h1 = None
+    if "altitude" in df2.columns:
+        h2 = df2["altitude"]
+    else:
+        h2 = None
+
+    power1 = df1["power"] if "power" in df1.columns else None
+    power2 = df2["power"] if "power" in df2.columns else None
+    dt1 = df1["timestamp"].diff().dt.total_seconds().fillna(0)
+    dt2 = df2["timestamp"].diff().dt.total_seconds().fillna(0)
+
+    ts = df1["timestamp"].values.astype("datetime64[ns]")
+    out = []
+    g = 9.81
+    n = int(window_points)
+
+    for t in intersections["timestamp"]:
+        t64 = np.datetime64(t)
+        idx = np.searchsorted(ts, t64)
+        if idx >= len(ts):
+            idx = len(ts) - 1
+        if idx > 0 and abs(ts[idx - 1] - t64) < abs(ts[idx] - t64):
+            idx = idx - 1
+
+        i0 = max(0, idx - n)
+        i1 = min(len(ts) - 1, idx + n)
+
+        v1_start = v1.iloc[i0]
+        v1_end = v1.iloc[i1]
+        v2_start = v2.iloc[i0]
+        v2_end = v2.iloc[i1]
+
+        dke1 = 0.5 * mass1 * (v1_end ** 2 - v1_start ** 2) if mass1 > 0 else np.nan
+        dke2 = 0.5 * mass2 * (v2_end ** 2 - v2_start ** 2) if mass2 > 0 else np.nan
+
+        if h1 is not None and mass1 > 0:
+            dpe1 = mass1 * g * (h1.iloc[i1] - h1.iloc[i0])
+        else:
+            dpe1 = np.nan
+
+        if h2 is not None and mass2 > 0:
+            dpe2 = mass2 * g * (h2.iloc[i1] - h2.iloc[i0])
+        else:
+            dpe2 = np.nan
+
+        if power1 is not None:
+            p1 = power1.iloc[i0:i1 + 1]
+            work1 = (p1.fillna(0) * dt1.iloc[i0:i1 + 1]).sum()
+        else:
+            work1 = np.nan
+
+        if power2 is not None:
+            p2 = power2.iloc[i0:i1 + 1]
+            work2 = (p2.fillna(0) * dt2.iloc[i0:i1 + 1]).sum()
+        else:
+            work2 = np.nan
+
+        dpe1_val = 0.0 if np.isnan(dpe1) else dpe1
+        dpe2_val = 0.0 if np.isnan(dpe2) else dpe2
+        residual1 = np.abs(dke1) - dpe1_val - work1
+        residual2 = np.abs(dke2) - dpe2_val - work2
+        residual_net = residual1 - residual2
+
+        out.append({
+            "timestamp": t,
+            "window_start": df1["timestamp"].iloc[i0],
+            "window_end": df1["timestamp"].iloc[i1],
+            "r1_dke_j": dke1,
+            "r2_dke_j": dke2,
+            "r1_dpe_j": dpe1,
+            "r2_dpe_j": dpe2,
+            "r1_work_j": work1,
+            "r2_work_j": work2,
+            "r1_residual_j": residual1,
+            "r2_residual_j": residual2,
+            "residual_net_j": residual_net,
+        })
+
+    return pd.DataFrame(out)
+
+
+def filter_intersections_by_segment_duration(df, intersections, min_duration_s):
+    if intersections.empty:
+        return intersections
+    cuts = np.sort(pd.to_datetime(intersections["timestamp"]).to_numpy(dtype="datetime64[ns]"))
+    t_start = np.datetime64(pd.to_datetime(df["timestamp"].iloc[0]))
+    t_end = np.datetime64(pd.to_datetime(df["timestamp"].iloc[-1]))
+    segment_starts = np.concatenate((np.array([t_start], dtype="datetime64[ns]"), cuts))
+    segment_ends = np.concatenate((cuts, np.array([t_end], dtype="datetime64[ns]")))
+    durations = np.array(
+        [(end - start) / np.timedelta64(1, "s") for start, end in zip(segment_starts, segment_ends)]
+    )
+
+    valid_idx = []
+    for i, t in enumerate(cuts):
+        before_ok = durations[i] >= min_duration_s
+        after_ok = durations[i + 1] >= min_duration_s
+        if before_ok and after_ok:
+            valid_idx.append(i)
+
+    if not valid_idx:
+        return intersections.iloc[0:0]
+
+    valid_times = cuts[valid_idx]
+    return intersections[intersections["timestamp"].isin(valid_times)].reset_index(drop=True)
+
+
+def plot_intersection_residuals(energy_df):
+    avg_residual = (energy_df["r1_residual_j"] + energy_df["r2_residual_j"]) / 2.0
+    net_residual = energy_df["residual_net_j"].abs() / 2.0
+    x = energy_df["timestamp"]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=x,
+            y=avg_residual,
+            error_y=dict(type="data", array=net_residual, visible=True),
+            name="Avg residual",
+            width=10000,
+            marker=dict(
+                color=avg_residual,
+                colorscale="RdYlGn_r",
+                showscale=False,
+            ),
+        )
+    )
+    fig.update_layout(
+        title="Intersection residuals (avg with net residual brackets)",
+        xaxis_title="Intersection time",
+        yaxis_title="Residual energy [J]",
+        template="plotly_white",
+        height=500,
+    )
     return fig
 
 
@@ -551,6 +798,7 @@ if file1 and file2:
         with col_a2:
             min_speed = st.slider("Minimum speed for intersections (km/h)", 0, 60, 15)
             min_seg_len = st.slider("Minimum segment duration (s)", 5, 120, 10)
+            window_points = st.slider("Intersection window (points each side)", 1, 5, 1)
     try:
         df1 = process_fit(file1.getvalue(), smooth_gps, meters_per_rev1)
         df2 = process_fit(file2.getvalue(), smooth_gps, meters_per_rev2)
@@ -582,11 +830,14 @@ if file1 and file2:
             f"{rider1_name} signals",
             f"{rider2_name} signals",
             "Power and speed comparison",
+            "Power/speed + residuals",
             "Opposed segment comparison",
             "Neutral-only power split overlay",
             "Active-only power split overlay",
             "Segment stats table",
             "Power split tables",
+            "Intersection energy table",
+            "Intersection residual plot",
         ]
         selected_plots = st.multiselect(
             "Choose plots to show",
@@ -646,8 +897,9 @@ if file1 and file2:
         intersections = find_speed_intersections_same_time(
             df1, df2, speed_mode1=speed_mode1, speed_mode2=speed_mode2, min_speed=min_speed
         )
+        intersections_valid = filter_intersections_by_segment_duration(df1, intersections, min_seg_len)
         exp_align.plotly_chart(
-            plot_speed_with_intersections(df1, df2, intersections,
+            plot_speed_with_intersections(df1, df2, intersections_valid,
                                           name1=rider1_name, name2=rider2_name,
                                           speed_mode1=speed_mode1, speed_mode2=speed_mode2),
             use_container_width=True,
@@ -738,6 +990,52 @@ if file1 and file2:
 
         if "Power split tables" in selected_plots:
             place_table("Power split tables", render_power_split_tables)
+
+        wants_energy = any(
+            name in selected_plots
+            for name in ["Intersection energy table", "Intersection residual plot", "Power/speed + residuals"]
+        )
+        energy_df = None
+        if wants_energy:
+            energy_df = compute_intersection_energy_table(
+                df1,
+                df2,
+                intersections_valid,
+                speed_mode1,
+                speed_mode2,
+                rider1_weight,
+                rider2_weight,
+                window_points=window_points,
+            )
+            if energy_df.empty:
+                energy_df = None
+
+        if "Intersection energy table" in selected_plots:
+            if energy_df is None:
+                place_table("Intersection energy table", lambda: st.info("Not enough data for energy table."))
+            else:
+                place_table("Intersection energy table", lambda: st.dataframe(energy_df))
+
+        if "Power/speed + residuals" in selected_plots:
+            if energy_df is None:
+                place_plot("Power/speed + residuals", go.Figure())
+                st.info("Not enough data for residual overlay.")
+            else:
+                place_plot(
+                    "Power/speed + residuals",
+                    plot_power_speed_with_residuals(
+                        df1, df2, energy_df,
+                        name1=rider1_name, name2=rider2_name,
+                        speed_mode1=speed_mode1, speed_mode2=speed_mode2, use_wkg=use_wkg,
+                    ),
+                )
+
+        if "Intersection residual plot" in selected_plots:
+            if energy_df is None:
+                place_plot("Intersection residual plot", go.Figure())
+                st.info("Not enough data for residual plot.")
+            else:
+                place_plot("Intersection residual plot", plot_intersection_residuals(energy_df))
 
         if use_wkg:
             xaxis_title = "Average power [W/kg]"
