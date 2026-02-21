@@ -5,6 +5,7 @@ All Plotly chart generation utilities for the Parloebs Analyse app.
 """
 
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -328,5 +329,216 @@ def plot_intersection_residuals(energy_df):
         yaxis_title="Residual energy [J]",
         template="plotly_white",
         height=500,
+    )
+    return fig
+
+
+def plot_cadence_optimization(
+    df_seg: pd.DataFrame,
+    roles: pd.DataFrame,
+    p_split: pd.DataFrame,
+    rider_id: str,
+    name: str,
+    speed_mode: str,
+    sling_seconds: int = 6,
+    color: str = RIDER1_COLOR,
+) -> go.Figure:
+    """Interactive Power vs. Cadence powerband chart for fixed-gear track cycling.
+
+    Parameters
+    ----------
+    df_seg     : segmented DataFrame from segment_by_intersections (has segment_id).
+    roles      : DataFrame from build_roles with columns [segment_id, active, neutral].
+    p_split    : DataFrame from power_split_stats; used to identify sling windows.
+    rider_id   : "rider1" or "rider2" — which rider's active segments to show.
+    name       : Display name for the rider.
+    speed_mode : Which speed column to use for marker coloring (sensor/cadence/gps/gps_smooth).
+    sling_seconds : Number of seconds before segment end to highlight as sling moments.
+    color      : Primary highlight colour for this rider.
+    """
+    # ── 1. Filter to this rider's active segments ──────────────────────────────
+    active_seg_ids = roles.loc[roles["active"] == rider_id, "segment_id"].values
+    df_active = df_seg[df_seg["segment_id"].isin(active_seg_ids)].copy()
+
+    # ── 2. Remove noise / coasting ─────────────────────────────────────────────
+    if "cadence" not in df_active.columns or "power" not in df_active.columns:
+        fig = go.Figure()
+        fig.update_layout(
+            title=f"{name} — Cadence Optimization (no cadence/power data)",
+            template="plotly_white",
+            height=500,
+        )
+        return fig
+
+    df_active = df_active[(df_active["cadence"] >= 40) & (df_active["power"] >= 50)].copy()
+
+    if df_active.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title=f"{name} — Cadence Optimization (insufficient data after filtering)",
+            template="plotly_white",
+            height=500,
+        )
+        return fig
+
+    # ── 3. Torque enrichment ────────────────────────────────────────────────────
+    df_active["torque_nm"] = (df_active["power"] * 60.0) / (
+        df_active["cadence"] * 2.0 * np.pi
+    )
+
+    # ── 4. Speed column for colour scale ───────────────────────────────────────
+    speed_col_map = {
+        "sensor": "speed",
+        "cadence": "speed_cadence",
+        "gps": "speed_gps",
+        "gps_smooth": "speed_gps_smooth",
+    }
+    raw_speed_col = speed_col_map.get(speed_mode, "speed_cadence")
+    if raw_speed_col in df_active.columns:
+        speed_kmh = df_active[raw_speed_col] * 3.6
+    elif "speed_cadence" in df_active.columns:
+        speed_kmh = df_active["speed_cadence"] * 3.6
+    else:
+        speed_kmh = pd.Series(np.zeros(len(df_active)), index=df_active.index)
+
+    cadence_vals = df_active["cadence"].values
+    power_vals = df_active["power"].values
+    torque_vals = df_active["torque_nm"].values
+    speed_vals = speed_kmh.values
+
+    # ── 5. Scatter trace (colored by speed) ────────────────────────────────────
+    hover_text = [
+        f"Cadence: {c:.0f} rpm<br>Power: {p:.0f} W<br>Torque: {t:.1f} Nm<br>Speed: {s:.1f} km/h"
+        for c, p, t, s in zip(cadence_vals, power_vals, torque_vals, speed_vals)
+    ]
+
+    scatter_trace = go.Scatter(
+        x=cadence_vals,
+        y=power_vals,
+        mode="markers",
+        name=f"{name} data",
+        text=hover_text,
+        hoverinfo="text",
+        marker=dict(
+            size=6,
+            color=speed_vals,
+            colorscale="Viridis",
+            showscale=True,
+            colorbar=dict(
+                title="Speed (km/h)",
+                thickness=14,
+                len=0.7,
+            ),
+            opacity=0.65,
+            line=dict(width=0),
+        ),
+    )
+
+    # ── 6. Polynomial trendline (degree-2) ─────────────────────────────────────
+    sort_idx = np.argsort(cadence_vals)
+    x_sorted = cadence_vals[sort_idx]
+    y_sorted = power_vals[sort_idx]
+
+    poly_degree = 2
+    coeffs = np.polyfit(x_sorted, y_sorted, poly_degree)
+    poly_fn = np.poly1d(coeffs)
+    x_line = np.linspace(x_sorted[0], x_sorted[-1], 200)
+    y_line = poly_fn(x_line)
+
+    trendline_trace = go.Scatter(
+        x=x_line,
+        y=y_line,
+        mode="lines",
+        name=f"{name} trendline",
+        line=dict(color=color, width=3, dash="solid"),
+        hoverinfo="skip",
+    )
+
+    # ── 7. Reference lines ─────────────────────────────────────────────────────
+    avg_power = float(np.nanmean(power_vals))
+    avg_cadence = float(np.nanmean(cadence_vals))
+
+    # ── 8. Sling moment overlay ────────────────────────────────────────────────
+    # The rider receiving the sling is NEUTRAL just before a hand-off.
+    # We identify the last `sling_seconds` of each segment where this rider is NEUTRAL.
+    neutral_seg_ids = roles.loc[roles["neutral"] == rider_id, "segment_id"].values
+    df_neutral = df_seg[df_seg["segment_id"].isin(neutral_seg_ids)].copy()
+
+    sling_dfs = []
+    for seg_id, grp in df_neutral.groupby("segment_id"):
+        t_end = grp["timestamp"].max()
+        t_cut = t_end - pd.Timedelta(seconds=sling_seconds)
+        sling_window = grp[grp["timestamp"] >= t_cut]
+        sling_dfs.append(sling_window)
+
+    sling_traces = []
+    if sling_dfs:
+        df_sling = pd.concat(sling_dfs, ignore_index=True)
+        # Apply the same noise filter
+        if "cadence" in df_sling.columns and "power" in df_sling.columns:
+            df_sling = df_sling[
+                (df_sling["cadence"] >= 40) & (df_sling["power"] >= 50)
+            ].copy()
+
+        if not df_sling.empty and "torque_nm" not in df_sling.columns:
+            df_sling["torque_nm"] = (df_sling["power"] * 60.0) / (
+                df_sling["cadence"] * 2.0 * np.pi
+            )
+
+        if not df_sling.empty:
+            sling_hover = [
+                f"⚡ SLING — Cadence: {c:.0f} rpm<br>Power: {p:.0f} W<br>"
+                f"Torque: {t:.1f} Nm"
+                for c, p, t in zip(
+                    df_sling["cadence"], df_sling["power"], df_sling["torque_nm"]
+                )
+            ]
+            sling_traces.append(
+                go.Scatter(
+                    x=df_sling["cadence"].values,
+                    y=df_sling["power"].values,
+                    mode="markers",
+                    name=f"{name} sling ({sling_seconds}s)",
+                    text=sling_hover,
+                    hoverinfo="text",
+                    marker=dict(
+                        size=14,
+                        symbol="star",
+                        color="#FFD700",
+                        line=dict(color="#FF6B00", width=1.5),
+                        opacity=0.95,
+                    ),
+                )
+            )
+
+    # ── 9. Assemble figure ─────────────────────────────────────────────────────
+    fig = go.Figure(data=[scatter_trace, trendline_trace] + sling_traces)
+
+    fig.add_hline(
+        y=avg_power,
+        line=dict(color="#FF7F0E", width=1.5, dash="dash"),
+        annotation_text=f"Avg active power: {avg_power:.0f} W",
+        annotation_position="top right",
+        annotation=dict(font=dict(size=11, color="#FF7F0E")),
+    )
+    fig.add_vline(
+        x=avg_cadence,
+        line=dict(color="#2CA02C", width=1.5, dash="dash"),
+        annotation_text=f"Avg cadence: {avg_cadence:.0f} rpm",
+        annotation_position="top left",
+        annotation=dict(font=dict(size=11, color="#2CA02C")),
+    )
+
+    fig.update_layout(
+        title=dict(
+            text=f"{name} — Fixed-Gear Powerband (Active Segments Only)",
+            font=dict(size=15),
+        ),
+        xaxis_title="Cadence [rpm]",
+        yaxis_title="Power [W]",
+        hovermode="closest",
+        template="plotly_white",
+        height=520,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig

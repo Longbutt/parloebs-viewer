@@ -29,6 +29,7 @@ from utils.plotting import (
     plot_opposed_power_split_neutral_overlay,
     plot_opposed_power_split_active_overlay,
     plot_intersection_residuals,
+    plot_cadence_optimization,
 )
 
 st.set_page_config(page_title="Parloebs Analyse Viewer", layout="wide")
@@ -113,6 +114,8 @@ if file1 and file2:
             "Power split tables",
             "Intersection energy table",
             "Intersection residual plot",
+            f"{rider1_name} cadence optimization",
+            f"{rider2_name} cadence optimization",
         ]
         selected_plots = st.multiselect(
             "Choose plots to show",
@@ -126,11 +129,13 @@ if file1 and file2:
                 "Neutral-only power split overlay",
                 "Active-only power split overlay",
                 "Power split tables",
+                f"{rider1_name} cadence optimization",
+                f"{rider2_name} cadence optimization",
             ]
         )
         if needs_power_split_window:
             with plot_header_cols[2]:
-                last_seconds = st.slider("Last X seconds", 3, 30, 6)
+                last_seconds = st.slider("Last X seconds / sling window", 3, 30, 6)
         else:
             last_seconds = 6
 
@@ -304,6 +309,36 @@ if file1 and file2:
                 st.info("Not enough data for residual plot.")
             else:
                 place_plot("Intersection residual plot", plot_intersection_residuals(energy_df))
+
+        if f"{rider1_name} cadence optimization" in selected_plots:
+            place_plot(
+                f"{rider1_name} cadence optimization",
+                plot_cadence_optimization(
+                    df_seg=df1_seg,
+                    roles=roles,
+                    p_split=p1,
+                    rider_id="rider1",
+                    name=rider1_name,
+                    speed_mode=speed_mode1,
+                    sling_seconds=last_seconds,
+                    color="#636EFA",
+                ),
+            )
+
+        if f"{rider2_name} cadence optimization" in selected_plots:
+            place_plot(
+                f"{rider2_name} cadence optimization",
+                plot_cadence_optimization(
+                    df_seg=df2_seg,
+                    roles=roles,
+                    p_split=p2,
+                    rider_id="rider2",
+                    name=rider2_name,
+                    speed_mode=speed_mode2,
+                    sling_seconds=last_seconds,
+                    color="#EF553B",
+                ),
+            )
 
         if use_wkg:
             xaxis_title = "Average power [W/kg]"
