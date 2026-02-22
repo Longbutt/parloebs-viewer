@@ -502,11 +502,10 @@ def plot_cadence_optimization(
                     text=sling_hover,
                     hoverinfo="text",
                     marker=dict(
-                        size=14,
-                        symbol="cross",
-                        color="#FFD700",
-                        line=dict(color="#FF6B00", width=1.5),
-                        opacity=0.95,
+                        size=10,
+                        symbol="x",
+                        color="black",
+                        opacity=0.8,
                     ),
                 )
             )
