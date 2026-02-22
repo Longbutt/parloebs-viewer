@@ -342,6 +342,8 @@ def plot_cadence_optimization(
     speed_mode: str,
     sling_seconds: int = 6,
     color: str = RIDER1_COLOR,
+    use_wkg: bool = False,
+    weight_kg: float = 0.0,
 ) -> go.Figure:
     """Interactive Power vs. Cadence powerband chart for fixed-gear track cycling.
 
@@ -406,9 +408,15 @@ def plot_cadence_optimization(
     torque_vals = df_active["torque_nm"].values
     speed_vals = speed_kmh.values
 
+    # Handle W/kg conversion if requested
+    power_unit = "W"
+    if use_wkg and weight_kg > 0:
+        power_vals = power_vals / weight_kg
+        power_unit = "W/kg"
+
     # ── 5. Scatter trace (colored by speed) ────────────────────────────────────
     hover_text = [
-        f"Cadence: {c:.0f} rpm<br>Power: {p:.0f} W<br>Torque: {t:.1f} Nm<br>Speed: {s:.1f} km/h"
+        f"Cadence: {c:.0f} rpm<br>Power: {p:.1f} {power_unit}<br>Torque: {t:.1f} Nm<br>Speed: {s:.1f} km/h"
         for c, p, t, s in zip(cadence_vals, power_vals, torque_vals, speed_vals)
     ]
 
@@ -480,23 +488,25 @@ def plot_cadence_optimization(
                 (df_sling["cadence"] >= 40) & (df_sling["power"] >= 50)
             ].copy()
 
-        if not df_sling.empty and "torque_nm" not in df_sling.columns:
+        if not df_sling.empty:
             df_sling["torque_nm"] = (df_sling["power"] * 60.0) / (
                 df_sling["cadence"] * 2.0 * np.pi
             )
+            s_power_vals = df_sling["power"].values
+            if use_wkg and weight_kg > 0:
+                s_power_vals = s_power_vals / weight_kg
 
-        if not df_sling.empty:
             sling_hover = [
-                f"⚡ SLING — Cadence: {c:.0f} rpm<br>Power: {p:.0f} W<br>"
+                f"⚡ SLING — Cadence: {c:.0f} rpm<br>Power: {p:.1f} {power_unit}<br>"
                 f"Torque: {t:.1f} Nm"
                 for c, p, t in zip(
-                    df_sling["cadence"], df_sling["power"], df_sling["torque_nm"]
+                    df_sling["cadence"], s_power_vals, df_sling["torque_nm"]
                 )
             ]
             sling_traces.append(
                 go.Scatter(
                     x=df_sling["cadence"].values,
-                    y=df_sling["power"].values,
+                    y=s_power_vals,
                     mode="markers",
                     name=f"{name} sling ({sling_seconds}s)",
                     text=sling_hover,
@@ -516,7 +526,7 @@ def plot_cadence_optimization(
     fig.add_hline(
         y=avg_power,
         line=dict(color="#FF7F0E", width=1.5, dash="dash"),
-        annotation_text=f"Avg active power: {avg_power:.0f} W",
+        annotation_text=f"Avg active power: {avg_power:.1f} {power_unit}",
         annotation_position="top right",
         annotation=dict(font=dict(size=11, color="#FF7F0E")),
     )
@@ -534,7 +544,7 @@ def plot_cadence_optimization(
             font=dict(size=15),
         ),
         xaxis_title="Cadence [rpm]",
-        yaxis_title="Power [W]",
+        yaxis_title=f"Power [{power_unit}]",
         hovermode="closest",
         template="plotly_white",
         height=520,

@@ -322,6 +322,8 @@ if file1 and file2:
                     speed_mode=speed_mode1,
                     sling_seconds=last_seconds,
                     color="#636EFA",
+                    use_wkg=use_wkg,
+                    weight_kg=weight1,
                 ),
             )
 
@@ -337,6 +339,8 @@ if file1 and file2:
                     speed_mode=speed_mode2,
                     sling_seconds=last_seconds,
                     color="#EF553B",
+                    use_wkg=use_wkg,
+                    weight_kg=weight2,
                 ),
             )
 
