@@ -323,7 +323,7 @@ if file1 and file2:
                     sling_seconds=last_seconds,
                     color="#636EFA",
                     use_wkg=use_wkg,
-                    weight_kg=weight1,
+                    weight_kg=rider1_weight,
                 ),
             )
 
@@ -340,7 +340,7 @@ if file1 and file2:
                     sling_seconds=last_seconds,
                     color="#EF553B",
                     use_wkg=use_wkg,
-                    weight_kg=weight2,
+                    weight_kg=rider2_weight,
                 ),
             )
 
