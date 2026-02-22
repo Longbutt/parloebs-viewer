@@ -114,8 +114,8 @@ if file1 and file2:
             "Power split tables",
             "Intersection energy table",
             "Intersection residual plot",
-            f"{rider1_name} cadence optimization",
-            f"{rider2_name} cadence optimization",
+            f"{rider1_name} Power Cadence Analysis",
+            f"{rider2_name} Power Cadence Analysis",
         ]
         selected_plots = st.multiselect(
             "Choose plots to show",
@@ -129,8 +129,8 @@ if file1 and file2:
                 "Neutral-only power split overlay",
                 "Active-only power split overlay",
                 "Power split tables",
-                f"{rider1_name} cadence optimization",
-                f"{rider2_name} cadence optimization",
+                f"{rider1_name} Power Cadence Analysis",
+                f"{rider2_name} Power Cadence Analysis",
             ]
         )
         if needs_power_split_window:
@@ -310,9 +310,9 @@ if file1 and file2:
             else:
                 place_plot("Intersection residual plot", plot_intersection_residuals(energy_df))
 
-        if f"{rider1_name} cadence optimization" in selected_plots:
+        if f"{rider1_name} Power Cadence Analysis" in selected_plots:
             place_plot(
-                f"{rider1_name} cadence optimization",
+                f"{rider1_name} Power Cadence Analysis",
                 plot_cadence_optimization(
                     df_seg=df1_seg,
                     roles=roles,
@@ -325,9 +325,9 @@ if file1 and file2:
                 ),
             )
 
-        if f"{rider2_name} cadence optimization" in selected_plots:
+        if f"{rider2_name} Power Cadence Analysis" in selected_plots:
             place_plot(
-                f"{rider2_name} cadence optimization",
+                f"{rider2_name} Power Cadence Analysis",
                 plot_cadence_optimization(
                     df_seg=df2_seg,
                     roles=roles,

@@ -530,7 +530,7 @@ def plot_cadence_optimization(
 
     fig.update_layout(
         title=dict(
-            text=f"{name} — Fixed-Gear Powerband (Active Segments Only)",
+            text=f"{name} — Power Cadence Analysis",
             font=dict(size=15),
         ),
         xaxis_title="Cadence [rpm]",
